@@ -1320,6 +1320,7 @@ async def mix_kg_vector_query(
                     chunk_with_time = {
                         "content": chunk["content"],
                         "created_at": result.get("created_at", None),
+                        "metadata": chunk.get("metadata", {})
                     }
                     valid_chunks.append(chunk_with_time)
 
@@ -1335,13 +1336,16 @@ async def mix_kg_vector_query(
             if not maybe_trun_chunks:
                 return None
 
-            # Include time information in content
+            # Include time information and metadata in content
             formatted_chunks = []
             for c in maybe_trun_chunks:
                 chunk_text = c["content"]
                 if c["created_at"]:
                     chunk_text = f"[Created at: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(c['created_at']))}]\n{chunk_text}"
-                formatted_chunks.append(chunk_text)
+                formatted_chunks.append(json.dumps({
+                    "content": chunk_text,
+                    "metadata": c.get("metadata", {})
+                }, indent=2))
 
             return "\n--New Chunk--\n".join(formatted_chunks)
         except Exception as e:

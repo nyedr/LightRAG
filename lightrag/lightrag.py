@@ -394,6 +394,7 @@ class LightRAG:
                         compute_mdhash_id(dp["content"], prefix="chunk-"): {
                             **dp,
                             "full_doc_id": doc_id,
+                            "metadata": doc["metadata"]
                         }
                         for dp in chunking_by_token_size(
                             doc["content"],
