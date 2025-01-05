@@ -768,9 +768,13 @@ async def _get_node_data(
         )
     relations_context = list_of_list_to_csv(relations_section_list)
 
-    text_units_section_list = [["id", "content"]]
+    text_units_section_list = [["id", "content", "metadata"]]
     for i, t in enumerate(use_text_units):
-        text_units_section_list.append([i, t["content"]])
+        text_units_section_list.append([
+            i,
+            t["content"],
+            json.dumps(t.get("metadata", {}))
+        ])
     text_units_context = list_of_list_to_csv(text_units_section_list)
     return entities_context, relations_context, text_units_context
 
@@ -801,7 +805,8 @@ async def _find_most_related_text_unit_from_entities(
 
     # Add null check for node data
     all_one_hop_text_units_lookup = {
-        k: set(split_string_by_multi_markers(v["source_id"], [GRAPH_FIELD_SEP]))
+        k: set(split_string_by_multi_markers(
+            v["source_id"], [GRAPH_FIELD_SEP]))
         for k, v in zip(all_one_hop_nodes, all_one_hop_nodes_data)
         if v is not None and "source_id" in v  # Add source_id check
     }
@@ -984,9 +989,13 @@ async def _get_edge_data(
         )
     entities_context = list_of_list_to_csv(entites_section_list)
 
-    text_units_section_list = [["id", "content"]]
+    text_units_section_list = [["id", "content", "metadata"]]
     for i, t in enumerate(use_text_units):
-        text_units_section_list.append([i, t["content"]])
+        text_units_section_list.append([
+            i,
+            t["content"],
+            json.dumps(t.get("metadata", {}))
+        ])
     text_units_context = list_of_list_to_csv(text_units_section_list)
     return entities_context, relations_context, text_units_context
 
@@ -1141,7 +1150,13 @@ async def naive_query(
         return PROMPTS["fail_response"]
 
     logger.info(f"Truncate {len(chunks)} to {len(maybe_trun_chunks)} chunks")
-    section = "\n--New Chunk--\n".join([c["content"] for c in maybe_trun_chunks])
+    section = "\n--New Chunk--\n".join([
+        json.dumps({
+            "content": c["content"],
+            "metadata": c.get("metadata", {})
+        }, indent=2)
+        for c in maybe_trun_chunks
+    ])
 
     if query_param.only_need_context:
         return section

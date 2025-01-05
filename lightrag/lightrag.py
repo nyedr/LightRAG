@@ -4,7 +4,7 @@ from tqdm.asyncio import tqdm as tqdm_async
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from functools import partial
-from typing import Type, cast, Dict
+from typing import Any, Type, cast, Dict
 
 from .llm import (
     gpt_4o_mini_complete,
@@ -311,23 +311,41 @@ class LightRAG:
             "JsonDocStatusStorage": JsonDocStatusStorage,
         }
 
-    def insert(self, string_or_strings):
+    def insert(self, string_or_strings, metadata: Dict[str, Any] = None):
         loop = always_get_an_event_loop()
-        return loop.run_until_complete(self.ainsert(string_or_strings))
+        return loop.run_until_complete(self.ainsert(string_or_strings, metadata))
 
-    async def ainsert(self, string_or_strings):
+    async def ainsert(self, string_or_strings, metadata: Dict[str, Any] = None):
         """Insert documents with checkpoint support
 
         Args:
             string_or_strings: Single document string or list of document strings
+            metadata: Optional metadata to store with the documents
         """
         if isinstance(string_or_strings, str):
             string_or_strings = [string_or_strings]
+            if metadata is not None and not isinstance(metadata, list):
+                metadata = [metadata]
 
-        # 1. Remove duplicate contents from the list
-        unique_contents = list(set(doc.strip() for doc in string_or_strings))
+        if metadata is not None and len(metadata) != len(string_or_strings):
+            raise ValueError(
+                "Length of metadata must match length of documents")
 
-        # 2. Generate document IDs and initial status
+        # 1. Create list of documents with their metadata
+        docs_with_metadata = []
+        for i, content in enumerate(string_or_strings):
+            doc_metadata = metadata[i] if metadata is not None else {}
+            docs_with_metadata.append((content.strip(), doc_metadata))
+
+        # 2. Remove duplicates while preserving the first occurrence's metadata
+        seen = set()
+        unique_docs = []
+        for content, meta in docs_with_metadata:
+            if content not in seen:
+                seen.add(content)
+                unique_docs.append((content, meta))
+
+        # 3. Generate document IDs and initial status
         new_docs = {
             compute_mdhash_id(content, prefix="doc-"): {
                 "content": content,
@@ -336,11 +354,12 @@ class LightRAG:
                 "status": DocStatus.PENDING,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
+                "metadata": meta,
             }
-            for content in unique_contents
+            for content, meta in unique_docs
         }
 
-        # 3. Filter out already processed documents
+        # 4. Filter out already processed documents
         _add_doc_keys = await self.doc_status.filter_keys(list(new_docs.keys()))
         new_docs = {k: v for k, v in new_docs.items() if k in _add_doc_keys}
 
@@ -353,7 +372,7 @@ class LightRAG:
         # Process documents in batches
         batch_size = self.addon_params.get("insert_batch_size", 10)
         for i in range(0, len(new_docs), batch_size):
-            batch_docs = dict(list(new_docs.items())[i : i + batch_size])
+            batch_docs = dict(list(new_docs.items())[i: i + batch_size])
 
             for doc_id, doc in tqdm_async(
                 batch_docs.items(), desc=f"Processing batch {i//batch_size + 1}"
@@ -366,6 +385,7 @@ class LightRAG:
                         "status": DocStatus.PROCESSING,
                         "created_at": doc["created_at"],
                         "updated_at": datetime.now().isoformat(),
+                        "metadata": doc["metadata"],
                     }
                     await self.doc_status.upsert({doc_id: doc_status})
 
@@ -414,7 +434,8 @@ class LightRAG:
 
                         # Store original document and chunks
                         await self.full_docs.upsert(
-                            {doc_id: {"content": doc["content"]}}
+                            {doc_id: {
+                                "content": doc["content"], "metadata": doc["metadata"]}}
                         )
                         await self.text_chunks.upsert(chunks)
 
@@ -479,9 +500,11 @@ class LightRAG:
             for chunk_data in custom_kg.get("chunks", []):
                 chunk_content = chunk_data["content"]
                 source_id = chunk_data["source_id"]
-                chunk_id = compute_mdhash_id(chunk_content.strip(), prefix="chunk-")
+                chunk_id = compute_mdhash_id(
+                    chunk_content.strip(), prefix="chunk-")
 
-                chunk_entry = {"content": chunk_content.strip(), "source_id": source_id}
+                chunk_entry = {"content": chunk_content.strip(),
+                               "source_id": source_id}
                 all_chunks_data[chunk_id] = chunk_entry
                 chunk_to_source_map[source_id] = chunk_id
                 update_storage = True
